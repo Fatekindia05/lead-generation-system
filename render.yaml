@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: lead-generation-backend
+    runtime: python
+    repo: https://github.com/FatekIndia05/lead-generation-system
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 8000
+    buildCommand: |
+      cd backend
+      pip install -r requirements.txt
+    startCommand: |
+      cd backend
+      uvicorn main:app --host 0.0.0.0 --port $PORT
