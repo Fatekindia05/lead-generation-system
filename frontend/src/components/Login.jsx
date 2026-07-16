@@ -39,7 +39,7 @@ const Login = () => {
       <div className="login-card">
         <div className="login-header">
           <div className="login-logo">
-            <img src="/logo.png" alt="Logo" className="login-logo-img" />
+            <img src="/logo192.png" alt="Logo" className="login-logo-img" />
           </div>
           <h2>Admin Login</h2>
           <p>Enter your credentials to access the dashboard</p>
