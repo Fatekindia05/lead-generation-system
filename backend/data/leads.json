@@ -1,1 +1,18 @@
-[]
+[
+  {
+    "id": 1,
+    "name": "Visitor - 7/16/2026, 3:26:47 PM",
+    "company": "Walk-in Visitor",
+    "email": "",
+    "phone": "",
+    "requirement_type": "ID Card Capture",
+    "customer_type": "Other",
+    "other_customer_type": "Walk-in Visitor",
+    "message": "ID Card captured via camera on 7/16/2026, 3:26:47 PM",
+    "source": "camera_capture",
+    "image_url": "/api/images/visitor_1_20260716_152648.jpg",
+    "status": "new",
+    "created_at": "2026-07-16T15:26:48.191904",
+    "updated_at": "2026-07-16T15:26:48.191917"
+  }
+]
