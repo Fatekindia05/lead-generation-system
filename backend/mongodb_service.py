@@ -5,34 +5,76 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 import gridfs
 from pymongo import MongoClient
+from pymongo.server_api import ServerApi
 from bson import ObjectId
 from PIL import Image
+import ssl
 
 # MongoDB connection
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://fatek_user:Fatek2026@cluster0.d5wpzja.mongodb.net/fatek_leads?appName=Cluster0")
 DB_NAME = os.environ.get("DB_NAME", "fatek_leads")
 
-# Connect to MongoDB
-client = MongoClient(MONGODB_URI)
+# Connect to MongoDB with proper SSL settings
+def get_mongo_client():
+    """Get MongoDB client with proper SSL/TLS configuration"""
+    try:
+        # Use the ServerApi for MongoDB Atlas
+        client = MongoClient(
+            MONGODB_URI,
+            server_api=ServerApi('1'),
+            tls=True,
+            tlsAllowInvalidCertificates=False,
+            tlsAllowInvalidHostnames=False,
+            retryWrites=True,
+            w='majority',
+            connectTimeoutMS=30000,
+            socketTimeoutMS=30000,
+            serverSelectionTimeoutMS=30000,
+        )
+        # Force a connection to test
+        client.admin.command('ping')
+        print("✅ MongoDB connection successful!")
+        return client
+    except Exception as e:
+        print(f"❌ MongoDB connection failed: {e}")
+        # Fallback to basic connection
+        try:
+            client = MongoClient(MONGODB_URI)
+            client.admin.command('ping')
+            print("✅ MongoDB connection successful (fallback)!")
+            return client
+        except Exception as e2:
+            print(f"❌ MongoDB connection failed (fallback): {e2}")
+            raise
+
+# Initialize client
+client = get_mongo_client()
 db = client[DB_NAME]
 leads_collection = db["leads"]
 fs = gridfs.GridFS(db)
 
 def init_db():
     """Initialize database collections and indexes"""
-    # Create counters collection for auto-increment
-    if db.counters.count_documents({"_id": "lead_id"}) == 0:
-        db.counters.insert_one({"_id": "lead_id", "seq": 0})
+    try:
+        if db.counters.count_documents({"_id": "lead_id"}) == 0:
+            db.counters.insert_one({"_id": "lead_id", "seq": 0})
+        print("✅ Database initialized")
+    except Exception as e:
+        print(f"❌ Database init failed: {e}")
 
 def get_next_id():
     """Get next auto-increment ID"""
-    counter = db.counters.find_one_and_update(
-        {"_id": "lead_id"},
-        {"$inc": {"seq": 1}},
-        upsert=True,
-        return_document=True
-    )
-    return counter["seq"]
+    try:
+        counter = db.counters.find_one_and_update(
+            {"_id": "lead_id"},
+            {"$inc": {"seq": 1}},
+            upsert=True,
+            return_document=True
+        )
+        return counter["seq"]
+    except Exception as e:
+        print(f"❌ Failed to get next ID: {e}")
+        return 1
 
 def save_image(base64_data, lead_id):
     """Save image to GridFS and return file ID"""
@@ -79,35 +121,39 @@ def delete_image(file_id):
 
 def save_lead(lead_data: Dict[str, Any]) -> int:
     """Save lead to MongoDB"""
-    init_db()
-    lead_id = get_next_id()
-    
-    # Save image if provided
-    image_file_id = None
-    if lead_data.get('image_url'):
-        image_file_id = save_image(lead_data['image_url'], lead_id)
-    
-    lead_entry = {
-        "id": lead_id,
-        "name": lead_data.get("name", ""),
-        "company": lead_data.get("company", ""),
-        "email": lead_data.get("email", ""),
-        "phone": lead_data.get("phone", ""),
-        "requirement_type": lead_data.get("requirement_type", ""),
-        "customer_type": lead_data.get("customer_type", ""),
-        "other_customer_type": lead_data.get("other_customer_type", ""),
-        "message": lead_data.get("message", ""),
-        "source": lead_data.get("source", "web_form"),
-        "image_file_id": image_file_id,
-        "image_url": f"/api/images/{image_file_id}" if image_file_id else None,
-        "status": "new",
-        "created_at": datetime.now().isoformat(),
-        "updated_at": datetime.now().isoformat(),
-    }
-    
-    leads_collection.insert_one(lead_entry)
-    print(f"✅ Lead saved with ID: {lead_id}")
-    return lead_id
+    try:
+        init_db()
+        lead_id = get_next_id()
+        
+        # Save image if provided
+        image_file_id = None
+        if lead_data.get('image_url'):
+            image_file_id = save_image(lead_data['image_url'], lead_id)
+        
+        lead_entry = {
+            "id": lead_id,
+            "name": lead_data.get("name", ""),
+            "company": lead_data.get("company", ""),
+            "email": lead_data.get("email", ""),
+            "phone": lead_data.get("phone", ""),
+            "requirement_type": lead_data.get("requirement_type", ""),
+            "customer_type": lead_data.get("customer_type", ""),
+            "other_customer_type": lead_data.get("other_customer_type", ""),
+            "message": lead_data.get("message", ""),
+            "source": lead_data.get("source", "web_form"),
+            "image_file_id": image_file_id,
+            "image_url": f"/api/images/{image_file_id}" if image_file_id else None,
+            "status": "new",
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+        
+        leads_collection.insert_one(lead_entry)
+        print(f"✅ Lead saved with ID: {lead_id}")
+        return lead_id
+    except Exception as e:
+        print(f"❌ Failed to save lead: {e}")
+        raise
 
 def get_all_leads(
     status: Optional[str] = None,
@@ -145,78 +191,105 @@ def get_all_leads(
             {"email": {"$regex": search, "$options": "i"}},
         ]
     
-    leads = list(leads_collection.find(query).skip(offset).limit(limit))
-    
-    # Convert ObjectId to string for JSON serialization
-    for lead in leads:
-        lead["_id"] = str(lead["_id"])
-    
-    return leads
+    try:
+        leads = list(leads_collection.find(query).skip(offset).limit(limit))
+        for lead in leads:
+            lead["_id"] = str(lead["_id"])
+        return leads
+    except Exception as e:
+        print(f"❌ Failed to get leads: {e}")
+        return []
 
 def get_lead_by_id(lead_id: int) -> Optional[Dict]:
     """Get single lead by ID"""
-    lead = leads_collection.find_one({"id": lead_id})
-    if lead:
-        lead["_id"] = str(lead["_id"])
-    return lead
+    try:
+        lead = leads_collection.find_one({"id": lead_id})
+        if lead:
+            lead["_id"] = str(lead["_id"])
+        return lead
+    except Exception as e:
+        print(f"❌ Failed to get lead: {e}")
+        return None
 
 def update_lead_status(lead_id: int, status: str) -> bool:
     """Update lead status"""
-    result = leads_collection.update_one(
-        {"id": lead_id},
-        {"$set": {"status": status, "updated_at": datetime.now().isoformat()}}
-    )
-    return result.modified_count > 0
+    try:
+        result = leads_collection.update_one(
+            {"id": lead_id},
+            {"$set": {"status": status, "updated_at": datetime.now().isoformat()}}
+        )
+        return result.modified_count > 0
+    except Exception as e:
+        print(f"❌ Failed to update lead: {e}")
+        return False
 
 def get_leads_statistics() -> Dict:
     """Get statistics about leads"""
-    total = leads_collection.count_documents({})
-    
     stats = {
-        "total_leads": total,
-        "new_count": leads_collection.count_documents({"status": "new"}),
-        "contacted_count": leads_collection.count_documents({"status": "contacted"}),
-        "converted_count": leads_collection.count_documents({"status": "converted"}),
-        "closed_count": leads_collection.count_documents({"status": "closed"}),
-        "with_images": leads_collection.count_documents({"image_file_id": {"$ne": None}}),
+        "total_leads": 0,
+        "new_count": 0,
+        "contacted_count": 0,
+        "converted_count": 0,
+        "closed_count": 0,
+        "with_images": 0,
+        "today_leads": 0,
         "requirement_counts": {},
         "customer_type_counts": {}
     }
     
-    # Get counts by requirement type
-    pipeline = [{"$group": {"_id": "$requirement_type", "count": {"$sum": 1}}}]
-    for result in leads_collection.aggregate(pipeline):
-        if result["_id"]:
-            stats["requirement_counts"][result["_id"]] = result["count"]
-    
-    # Get counts by customer type
-    pipeline = [{"$group": {"_id": "$customer_type", "count": {"$sum": 1}}}]
-    for result in leads_collection.aggregate(pipeline):
-        if result["_id"]:
-            stats["customer_type_counts"][result["_id"]] = result["count"]
-    
-    # Today's leads
-    today = datetime.now().date().isoformat()
-    stats["today_leads"] = leads_collection.count_documents({
-        "created_at": {"$regex": f"^{today}"}
-    })
+    try:
+        stats["total_leads"] = leads_collection.count_documents({})
+        stats["new_count"] = leads_collection.count_documents({"status": "new"})
+        stats["contacted_count"] = leads_collection.count_documents({"status": "contacted"})
+        stats["converted_count"] = leads_collection.count_documents({"status": "converted"})
+        stats["closed_count"] = leads_collection.count_documents({"status": "closed"})
+        stats["with_images"] = leads_collection.count_documents({"image_file_id": {"$ne": None}})
+        
+        # Today's leads
+        today = datetime.now().date().isoformat()
+        stats["today_leads"] = leads_collection.count_documents({
+            "created_at": {"$regex": f"^{today}"}
+        })
+        
+        # Get counts by requirement type
+        pipeline = [{"$group": {"_id": "$requirement_type", "count": {"$sum": 1}}}]
+        for result in leads_collection.aggregate(pipeline):
+            if result["_id"]:
+                stats["requirement_counts"][result["_id"]] = result["count"]
+        
+        # Get counts by customer type
+        pipeline = [{"$group": {"_id": "$customer_type", "count": {"$sum": 1}}}]
+        for result in leads_collection.aggregate(pipeline):
+            if result["_id"]:
+                stats["customer_type_counts"][result["_id"]] = result["count"]
+                
+    except Exception as e:
+        print(f"❌ Failed to get stats: {e}")
     
     return stats
 
 def delete_lead(lead_id: int) -> bool:
     """Delete lead by ID"""
-    # Get lead to delete image
-    lead = leads_collection.find_one({"id": lead_id})
-    if lead and lead.get('image_file_id'):
-        delete_image(lead['image_file_id'])
-        print(f"🗑️ Deleted image from MongoDB")
-    
-    result = leads_collection.delete_one({"id": lead_id})
-    return result.deleted_count > 0
+    try:
+        # Get lead to delete image
+        lead = leads_collection.find_one({"id": lead_id})
+        if lead and lead.get('image_file_id'):
+            delete_image(lead['image_file_id'])
+            print(f"🗑️ Deleted image from MongoDB")
+        
+        result = leads_collection.delete_one({"id": lead_id})
+        return result.deleted_count > 0
+    except Exception as e:
+        print(f"❌ Failed to delete lead: {e}")
+        return False
 
 def export_leads() -> List[Dict]:
     """Export all leads"""
-    leads = list(leads_collection.find({}))
-    for lead in leads:
-        lead["_id"] = str(lead["_id"])
-    return leads
+    try:
+        leads = list(leads_collection.find({}))
+        for lead in leads:
+            lead["_id"] = str(lead["_id"])
+        return leads
+    except Exception as e:
+        print(f"❌ Failed to export leads: {e}")
+        return []
