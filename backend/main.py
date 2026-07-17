@@ -1,12 +1,19 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from datetime import datetime
 from typing import Optional
 import os
+import io
 
 from models import LeadForm, LeadResponse
-from lead_service import save_lead, get_all_leads, get_leads_statistics
+from mongodb_service import (
+    save_lead, 
+    get_all_leads, 
+    get_leads_statistics,
+    get_image,
+    delete_image
+)
 from admin_routes import router as admin_router
 
 app = FastAPI(
@@ -38,7 +45,6 @@ app.include_router(admin_router)
 
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
         "service": "FATEK Lead Generation System",
         "version": "1.0.0",
@@ -52,7 +58,6 @@ async def root():
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
     return {
         "status": "ok",
         "service": "FATEK Lead Generation System",
@@ -62,13 +67,11 @@ async def health_check():
 
 @app.post("/api/leads", response_model=LeadResponse)
 async def submit_lead(lead: LeadForm):
-    """Submit a new lead"""
     try:
         lead_id = save_lead(lead.model_dump())
-        
         return LeadResponse(
             id=lead_id,
-            message=f"Thank you {lead.name}! Your enquiry has been received. Our team will contact you soon.",
+            message=f"Thank you {lead.name}! Your enquiry has been received.",
             status="success"
         )
     except Exception as e:
@@ -83,7 +86,6 @@ async def get_leads(
     limit: int = 100,
     offset: int = 0
 ):
-    """Get all leads with optional filters"""
     leads = get_all_leads(
         status=status,
         requirement_type=requirement_type,
@@ -96,16 +98,35 @@ async def get_leads(
 
 @app.get("/api/stats")
 async def get_stats():
-    """Get lead statistics"""
     return get_leads_statistics()
 
-@app.get("/api/images/{image_filename}")
-async def get_image(image_filename: str):
-    """Serve captured images"""
-    image_path = os.path.join("data/images", image_filename)
-    if os.path.exists(image_path):
-        return FileResponse(image_path)
+@app.get("/api/images/{image_id}")
+async def get_image_by_id(image_id: str):
+    """Serve captured images from MongoDB"""
+    try:
+        image_file = get_image(image_id)
+        if image_file:
+            image_data = image_file.read()
+            return StreamingResponse(
+                io.BytesIO(image_data),
+                media_type="image/jpeg",
+                headers={
+                    "Content-Disposition": f"inline; filename={image_file.filename}",
+                    "Cache-Control": "public, max-age=31536000"
+                }
+            )
+    except Exception as e:
+        print(f"Error serving image: {e}")
+    
     raise HTTPException(status_code=404, detail="Image not found")
+
+@app.delete("/api/images/{image_id}")
+async def delete_image_by_id(image_id: str):
+    """Delete image from MongoDB"""
+    success = delete_image(image_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Image not found")
+    return {"status": "success", "message": "Image deleted"}
 
 if __name__ == "__main__":
     import uvicorn

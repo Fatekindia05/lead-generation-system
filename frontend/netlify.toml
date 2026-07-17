@@ -2,11 +2,24 @@
   command = "cd frontend && npm install --legacy-peer-deps && npm run build"
   publish = "frontend/build"
 
+# Single Page Application routing - FIXES 404 on refresh
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
 
+# Also handle /admin specifically
+[[redirects]]
+  from = "/admin"
+  to = "/index.html"
+  status = 200
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/index.html"
+  status = 200
+
+# Cache static assets
 [[headers]]
   for = "/static/*"
   [headers.values]

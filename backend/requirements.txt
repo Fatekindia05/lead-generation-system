@@ -7,4 +7,6 @@ slowapi==0.1.9
 email-validator==2.1.0
 openpyxl==3.1.2
 requests==2.31.0
-Pillow==10.1.0
+Pillow==11.0.0
+pymongo==4.6.1
+dnspython==2.6.1

@@ -25,7 +25,7 @@ const Login = () => {
         toast.success('Login successful!');
         navigate('/admin');
       } else {
-        toast.error('Invalid credentials. Use admin@fatek.com / fatek2024');
+        toast.error('Invalid credentials. Use admin@fatek.com / fatek2026');
       }
     } catch (error) {
       toast.error('Login failed. Please try again.');

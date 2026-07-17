@@ -264,7 +264,6 @@ const LeadForm = () => {
             value={formData.email}
             onChange={handleChange}
             placeholder="Enter your email address"
-            required
           />
         </div>
 
