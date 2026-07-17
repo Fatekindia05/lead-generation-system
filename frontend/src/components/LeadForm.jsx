@@ -86,6 +86,10 @@ const LeadForm = () => {
       toast.error('Please specify your customer type');
       return;
     }
+    if (formData.phone && !/^\d{10}$/.test(formData.phone)) {
+    toast.error('Phone number must be exactly 10 digits');
+    return;
+    }
 
     setLoading(true);
     try {
@@ -272,6 +276,8 @@ const LeadForm = () => {
             name="phone"
             value={formData.phone}
             onChange={handleChange}
+            maxLength="10"
+            pattern="[0-9]{10}"
             placeholder="Enter your phone number (optional)"
           />
         </div>

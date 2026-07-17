@@ -207,6 +207,11 @@
   background: #000;
   min-height: 300px;
   object-fit: cover;
+  /* Remove the fixed transform - now controlled by mirror class */
+}
+
+/* Mirror for front camera only (selfie view) */
+.video-preview.mirror {
   transform: scaleX(-1);
 }
 

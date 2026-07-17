@@ -10,6 +10,7 @@ const CameraCapture = ({ onCapture, onCancel }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [facingMode, setFacingMode] = useState('environment'); // 'user' or 'environment'
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -49,10 +50,25 @@ const CameraCapture = ({ onCapture, onCancel }) => {
         throw new Error('Camera API not supported in this browser');
       }
 
+      // Use the current facing mode
       const constraintsList = [
+        {
+          video: {
+            facingMode: facingMode,
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          },
+          audio: false
+        },
+        {
+          video: {
+            facingMode: facingMode === 'environment' ? 'user' : 'environment',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          },
+          audio: false
+        },
         { video: { width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
-        { video: { facingMode: 'environment', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
-        { video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false },
         { video: true, audio: false },
       ];
 
@@ -118,7 +134,7 @@ const CameraCapture = ({ onCapture, onCancel }) => {
       setIsLoading(false);
       toast.error(errorMessage);
     }
-  }, [stopCamera]);
+  }, [facingMode, stopCamera]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -228,14 +244,18 @@ const CameraCapture = ({ onCapture, onCancel }) => {
         return;
       }
 
-      const settings = tracks[0].getSettings();
-      const currentFacing = settings.facingMode || 'environment';
-      const newFacing = currentFacing === 'environment' ? 'user' : 'environment';
+      // Toggle facing mode
+      const newFacingMode = facingMode === 'environment' ? 'user' : 'environment';
+      setFacingMode(newFacingMode);
 
       stopCamera();
 
       const constraints = {
-        video: { facingMode: newFacing, width: { ideal: 640 }, height: { ideal: 480 } },
+        video: {
+          facingMode: newFacingMode,
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        },
         audio: false,
       };
 
@@ -249,7 +269,7 @@ const CameraCapture = ({ onCapture, onCancel }) => {
             .play()
             .then(() => {
               setCameraReady(true);
-              toast.success(`Switched to ${newFacing === 'user' ? 'front' : 'back'} camera`);
+              toast.success(`Switched to ${newFacingMode === 'user' ? 'front' : 'back'} camera`);
             })
             .catch(err => {
               console.error('Switch play failed:', err);
@@ -311,7 +331,7 @@ const CameraCapture = ({ onCapture, onCancel }) => {
                   autoPlay
                   playsInline
                   muted
-                  className="video-preview"
+                  className={`video-preview ${facingMode === 'user' ? 'mirror' : ''}`}
                   style={{ display: cameraReady ? 'block' : 'none' }}
                 />
 
