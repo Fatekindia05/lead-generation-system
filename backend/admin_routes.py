@@ -182,9 +182,9 @@ async def export_excel():
                                 img = img.convert('RGB')
                             
                             # Calculate new size - larger for better quality
-                            # Max 300x240 pixels for better visibility
-                            max_width = 300
-                            max_height = 240
+                            # Max 250x250 pixels for better visibility
+                            max_width = 250
+                            max_height = 250
                             
                             # Calculate aspect ratio
                             width_ratio = max_width / img.width
