@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # MongoDB connection
-MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://fatek_user:Fatek2026@cluster0.d5wpzja.mongodb.net/fatek_leads?appName=Cluster0")
-DB_NAME = os.environ.get("DB_NAME", "fatek_leads")
+MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://fatek_user:Fatek2026@cluster0.d5wpzja.mongodb.net/fake_Leads?appName=Cluster0")
+DB_NAME = os.environ.get("DB_NAME", "fake_Leads")
 
 # Global variables for lazy connection
 _client = None
@@ -104,7 +104,7 @@ def get_db():
     global _db
     if _db is None:
         client = get_client()
-        if client:
+        if client is not None:  # Proper None check
             _db = client[DB_NAME]
             logger.info(f"✅ Database '{DB_NAME}' selected")
         else:
@@ -116,7 +116,7 @@ def get_leads_collection():
     global _leads_collection
     if _leads_collection is None:
         db = get_db()
-        if db:
+        if db is not None:  # Proper None check
             _leads_collection = db["leads"]
             logger.info("✅ Leads collection selected")
         else:
@@ -128,7 +128,7 @@ def get_fs():
     global _fs
     if _fs is None:
         db = get_db()
-        if db:
+        if db is not None:  # Proper None check
             _fs = gridfs.GridFS(db)
             logger.info("✅ GridFS initialized")
     return _fs
@@ -136,7 +136,7 @@ def get_fs():
 def check_connection():
     """Check if MongoDB is connected"""
     client = get_client()
-    if client:
+    if client is not None:
         try:
             client.admin.command('ping')
             return True
@@ -290,6 +290,7 @@ def save_lead(lead_data: Dict[str, Any]) -> int:
         return lead_id
     except Exception as e:
         logger.error(f"❌ Failed to save lead: {e}")
+        # Don't raise - return 0 to indicate failure
         return 0
 
 def get_all_leads(
