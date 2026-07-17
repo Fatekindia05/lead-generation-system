@@ -77,6 +77,17 @@ async def submit_lead(lead: LeadForm):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save lead: {str(e)}")
 
+
+@app.get("/api/mongodb-status")
+async def mongodb_status():
+    """Check MongoDB connection status"""
+    from mongodb_service import check_connection, get_leads_statistics
+    status = {
+        "connected": check_connection(),
+        "stats": get_leads_statistics() if check_connection() else None,
+        "message": "Connected to MongoDB" if check_connection() else "Failed to connect to MongoDB"
+    }
+    return status
 @app.get("/api/leads")
 async def get_leads(
     status: Optional[str] = None,
