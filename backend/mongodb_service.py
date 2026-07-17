@@ -9,62 +9,115 @@ from pymongo.server_api import ServerApi
 from bson import ObjectId
 from PIL import Image
 import ssl
+import time
 
 # MongoDB connection
 MONGODB_URI = os.environ.get("MONGODB_URI", "mongodb+srv://fatek_user:Fatek2026@cluster0.d5wpzja.mongodb.net/fatek_leads?appName=Cluster0")
 DB_NAME = os.environ.get("DB_NAME", "fatek_leads")
 
-# Connect to MongoDB with proper SSL settings
-def get_mongo_client():
-    """Get MongoDB client with proper SSL/TLS configuration"""
-    try:
-        # Use the ServerApi for MongoDB Atlas
-        client = MongoClient(
-            MONGODB_URI,
-            server_api=ServerApi('1'),
-            tls=True,
-            tlsAllowInvalidCertificates=False,
-            tlsAllowInvalidHostnames=False,
-            retryWrites=True,
-            w='majority',
-            connectTimeoutMS=30000,
-            socketTimeoutMS=30000,
-            serverSelectionTimeoutMS=30000,
-        )
-        # Force a connection to test
-        client.admin.command('ping')
-        print("✅ MongoDB connection successful!")
-        return client
-    except Exception as e:
-        print(f"❌ MongoDB connection failed: {e}")
-        # Fallback to basic connection
-        try:
-            client = MongoClient(MONGODB_URI)
-            client.admin.command('ping')
-            print("✅ MongoDB connection successful (fallback)!")
-            return client
-        except Exception as e2:
-            print(f"❌ MongoDB connection failed (fallback): {e2}")
-            raise
+# Lazy connection - only connect when needed
+_client = None
+_db = None
+_leads_collection = None
+_fs = None
 
-# Initialize client
-client = get_mongo_client()
-db = client[DB_NAME]
-leads_collection = db["leads"]
-fs = gridfs.GridFS(db)
+def get_client():
+    """Get MongoDB client - connects lazily"""
+    global _client
+    if _client is None:
+        try:
+            print("🔌 Connecting to MongoDB...")
+            # Try with explicit SSL/TLS settings
+            _client = MongoClient(
+                MONGODB_URI,
+                server_api=ServerApi('1'),
+                tls=True,
+                tlsAllowInvalidCertificates=False,
+                tlsAllowInvalidHostnames=False,
+                retryWrites=True,
+                w='majority',
+                connectTimeoutMS=30000,
+                socketTimeoutMS=30000,
+                serverSelectionTimeoutMS=30000,
+                ssl=True,
+                ssl_cert_reqs=ssl.CERT_REQUIRED,
+            )
+            # Test connection
+            _client.admin.command('ping')
+            print("✅ MongoDB connection successful!")
+        except Exception as e:
+            print(f"❌ MongoDB connection error: {e}")
+            # Try fallback without SSL
+            try:
+                print("🔄 Trying fallback connection...")
+                _client = MongoClient(
+                    MONGODB_URI,
+                    server_api=ServerApi('1'),
+                    tls=False,
+                    retryWrites=True,
+                    w='majority',
+                    connectTimeoutMS=30000,
+                    socketTimeoutMS=30000,
+                    serverSelectionTimeoutMS=30000,
+                )
+                _client.admin.command('ping')
+                print("✅ MongoDB connection successful (fallback)!")
+            except Exception as e2:
+                print(f"❌ Fallback connection failed: {e2}")
+                # Don't raise - we'll try again later
+                _client = None
+    return _client
+
+def get_db():
+    """Get database instance"""
+    global _db
+    if _db is None:
+        client = get_client()
+        if client:
+            _db = client[DB_NAME]
+    return _db
+
+def get_leads_collection():
+    """Get leads collection"""
+    global _leads_collection
+    if _leads_collection is None:
+        db = get_db()
+        if db:
+            _leads_collection = db["leads"]
+    return _leads_collection
+
+def get_fs():
+    """Get GridFS instance"""
+    global _fs
+    if _fs is None:
+        db = get_db()
+        if db:
+            _fs = gridfs.GridFS(db)
+    return _fs
 
 def init_db():
     """Initialize database collections and indexes"""
     try:
+        db = get_db()
+        if db is None:
+            print("⚠️ Database not available, skipping init")
+            return False
+        
+        # Create counters collection for auto-increment
         if db.counters.count_documents({"_id": "lead_id"}) == 0:
             db.counters.insert_one({"_id": "lead_id", "seq": 0})
         print("✅ Database initialized")
+        return True
     except Exception as e:
-        print(f"❌ Database init failed: {e}")
+        print(f"⚠️ Database init warning: {e}")
+        return False
 
 def get_next_id():
     """Get next auto-increment ID"""
     try:
+        db = get_db()
+        if db is None:
+            return 1
         counter = db.counters.find_one_and_update(
             {"_id": "lead_id"},
             {"$inc": {"seq": 1}},
@@ -73,7 +126,7 @@ def get_next_id():
         )
         return counter["seq"]
     except Exception as e:
-        print(f"❌ Failed to get next ID: {e}")
+        print(f"⚠️ Failed to get next ID: {e}")
         return 1
 
 def save_image(base64_data, lead_id):
@@ -88,6 +141,11 @@ def save_image(base64_data, lead_id):
         
         image_data = base64.b64decode(base64_data)
         filename = f"visitor_{lead_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        
+        fs = get_fs()
+        if fs is None:
+            print("❌ GridFS not available")
+            return None
         
         # Store in GridFS
         file_id = fs.put(
@@ -107,6 +165,9 @@ def save_image(base64_data, lead_id):
 def get_image(file_id):
     """Retrieve image from GridFS"""
     try:
+        fs = get_fs()
+        if fs is None:
+            return None
         return fs.get(ObjectId(file_id))
     except:
         return None
@@ -114,6 +175,9 @@ def get_image(file_id):
 def delete_image(file_id):
     """Delete image from GridFS"""
     try:
+        fs = get_fs()
+        if fs is None:
+            return False
         fs.delete(ObjectId(file_id))
         return True
     except:
@@ -122,7 +186,14 @@ def delete_image(file_id):
 def save_lead(lead_data: Dict[str, Any]) -> int:
     """Save lead to MongoDB"""
     try:
+        # Try to initialize DB
         init_db()
+        
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            print("❌ Leads collection not available")
+            return 0
+        
         lead_id = get_next_id()
         
         # Save image if provided
@@ -153,7 +224,7 @@ def save_lead(lead_data: Dict[str, Any]) -> int:
         return lead_id
     except Exception as e:
         print(f"❌ Failed to save lead: {e}")
-        raise
+        return 0
 
 def get_all_leads(
     status: Optional[str] = None,
@@ -192,6 +263,10 @@ def get_all_leads(
         ]
     
     try:
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            return []
+        
         leads = list(leads_collection.find(query).skip(offset).limit(limit))
         for lead in leads:
             lead["_id"] = str(lead["_id"])
@@ -203,6 +278,9 @@ def get_all_leads(
 def get_lead_by_id(lead_id: int) -> Optional[Dict]:
     """Get single lead by ID"""
     try:
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            return None
         lead = leads_collection.find_one({"id": lead_id})
         if lead:
             lead["_id"] = str(lead["_id"])
@@ -214,6 +292,9 @@ def get_lead_by_id(lead_id: int) -> Optional[Dict]:
 def update_lead_status(lead_id: int, status: str) -> bool:
     """Update lead status"""
     try:
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            return False
         result = leads_collection.update_one(
             {"id": lead_id},
             {"$set": {"status": status, "updated_at": datetime.now().isoformat()}}
@@ -238,6 +319,11 @@ def get_leads_statistics() -> Dict:
     }
     
     try:
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            print("⚠️ Leads collection not available for stats")
+            return stats
+        
         stats["total_leads"] = leads_collection.count_documents({})
         stats["new_count"] = leads_collection.count_documents({"status": "new"})
         stats["contacted_count"] = leads_collection.count_documents({"status": "contacted"})
@@ -264,13 +350,17 @@ def get_leads_statistics() -> Dict:
                 stats["customer_type_counts"][result["_id"]] = result["count"]
                 
     except Exception as e:
-        print(f"❌ Failed to get stats: {e}")
+        print(f"⚠️ Failed to get stats: {e}")
     
     return stats
 
 def delete_lead(lead_id: int) -> bool:
     """Delete lead by ID"""
     try:
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            return False
+        
         # Get lead to delete image
         lead = leads_collection.find_one({"id": lead_id})
         if lead and lead.get('image_file_id'):
@@ -286,6 +376,9 @@ def delete_lead(lead_id: int) -> bool:
 def export_leads() -> List[Dict]:
     """Export all leads"""
     try:
+        leads_collection = get_leads_collection()
+        if leads_collection is None:
+            return []
         leads = list(leads_collection.find({}))
         for lead in leads:
             lead["_id"] = str(lead["_id"])
