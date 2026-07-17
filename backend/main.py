@@ -15,16 +15,16 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS configuration - Allow all origins for testing
+# CORS configuration
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:8000",
-        "https://*.netlify.app",  # Netlify frontend
-        "https://*.vercel.app",   # Vercel frontend
-        "*",  # Allow all for testing (remove in production)
+        "https://*.netlify.app",
+        "https://*.vercel.app",
+        "*",
     ],
     allow_credentials=True,
     allow_methods=["*"],

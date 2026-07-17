@@ -6,7 +6,7 @@ class LeadForm(BaseModel):
     """Lead form submission model"""
     name: str = Field(..., min_length=1, max_length=100, description="Customer name")
     company: str = Field(..., min_length=1, max_length=200, description="Organization name")
-    email: str = Field(default="", max_length=100, description="Email address")  # ← Allow empty
+    email: str = Field(default="", max_length=100, description="Email address")
     phone: Optional[str] = Field(default="", max_length=20, description="Phone number")
     
     requirement_type: str = Field(default="General Inquiry", description="Requirement types")
@@ -29,11 +29,10 @@ class LeadForm(BaseModel):
     @field_validator('email')
     @classmethod
     def validate_email(cls, v: str) -> str:
-        # Allow empty email or validate if provided
         if not v or v.strip() == '':
-            return ''  # Return empty string for camera-only captures
+            return ''
         if '@' not in v or '.' not in v:
-            return ''  # Invalid email -> return empty
+            return ''
         return v
 
 class LeadResponse(BaseModel):
