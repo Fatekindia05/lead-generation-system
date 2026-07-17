@@ -119,8 +119,8 @@ async def export_csv():
 @router.get("/export/excel")
 async def export_excel():
     """
-    Export leads as Excel file with embedded high-quality images
-    Images are embedded at a higher resolution for better quality
+    Export leads as Excel file with embedded images
+    Cell size exactly matches image size
     """
     leads = export_leads()
     
@@ -144,8 +144,8 @@ async def export_excel():
                "Requirement Type", "Customer Type", "Other Customer Type", 
                "Status", "Created At", "Message"]
     
-    # Column widths - wider for image column
-    col_widths = [6, 35, 20, 25, 30, 15, 20, 18, 20, 12, 22, 50]
+    # Column widths - set initial widths
+    col_widths = [6, 40, 20, 25, 30, 15, 20, 18, 20, 12, 22, 50]
     
     for col, header in enumerate(headers, 1):
         cell = ws.cell(row=1, column=col, value=header)
@@ -156,74 +156,125 @@ async def export_excel():
     
     ws.row_dimensions[1].height = 30
     
-    # Track rows with images
-    image_rows = {}
+    # Track the maximum image width for column adjustment
+    max_image_width = 0
+    
+    # Store all image details to calculate final column width
+    image_details = []
+    
+    # First pass: Process all images to get dimensions
+    for row_idx, lead in enumerate(leads, 2):
+        image_url = lead.get('image_url')
+        image_detail = {
+            'row_idx': row_idx,
+            'lead': lead,
+            'image_path': None,
+            'width': 0,
+            'height': 0,
+            'has_image': False
+        }
+        
+        if image_url:
+            try:
+                filename = image_url.split('/')[-1]
+                image_path = os.path.join("data/images", filename)
+                
+                if os.path.exists(image_path):
+                    with Image.open(image_path) as img:
+                        # Convert to RGB if necessary
+                        if img.mode in ('RGBA', 'LA', 'P'):
+                            img = img.convert('RGB')
+                        
+                        # Target size: maintain aspect ratio, max 350x280 pixels
+                        max_width = 350
+                        max_height = 280
+                        
+                        # Calculate aspect ratio
+                        width_ratio = max_width / img.width
+                        height_ratio = max_height / img.height
+                        ratio = min(width_ratio, height_ratio, 1.0)  # Don't upscale
+                        
+                        new_width = int(img.width * ratio)
+                        new_height = int(img.height * ratio)
+                        
+                        image_detail['has_image'] = True
+                        image_detail['width'] = new_width
+                        image_detail['height'] = new_height
+                        image_detail['image_path'] = image_path
+                        
+                        # Track max width for column adjustment
+                        if new_width > max_image_width:
+                            max_image_width = new_width
+            except Exception as e:
+                print(f"Error processing image for lead {lead.get('id')}: {e}")
+        
+        image_details.append(image_detail)
+    
+    # Calculate column width based on max image width
+    # Excel column width: 1 unit = 7 pixels approximately
+    if max_image_width > 0:
+        # Add 5 pixels padding for cell borders
+        image_column_width = (max_image_width + 10) / 7
+        # Ensure minimum width
+        image_column_width = max(image_column_width, 25)
+        # Set the image column (column B) width
+        ws.column_dimensions['B'].width = image_column_width
+    
+    # Create temp directory for resized images
     temp_dir = tempfile.mkdtemp()
     temp_files = []
     
     try:
-        for row_idx, lead in enumerate(leads, 2):
+        # Second pass: Add images and set row heights
+        for detail in image_details:
+            row_idx = detail['row_idx']
+            lead = detail['lead']
+            
             # ID
             ws.cell(row=row_idx, column=1, value=lead.get('id'))
             ws.cell(row=row_idx, column=1).alignment = center_alignment
             
-            # Image - insert into cell with HIGH quality
-            image_url = lead.get('image_url')
-            if image_url:
+            # Image
+            if detail['has_image']:
                 try:
-                    filename = image_url.split('/')[-1]
-                    image_path = os.path.join("data/images", filename)
+                    img = Image.open(detail['image_path'])
+                    if img.mode in ('RGBA', 'LA', 'P'):
+                        img = img.convert('RGB')
                     
-                    if os.path.exists(image_path):
-                        # Open and resize image - BETTER QUALITY
-                        with Image.open(image_path) as img:
-                            # Convert to RGB if necessary
-                            if img.mode in ('RGBA', 'LA', 'P'):
-                                img = img.convert('RGB')
-                            
-                            # Calculate new size - larger for better quality
-                            # Max 250x250 pixels for better visibility
-                            max_width = 250
-                            max_height = 250
-                            
-                            # Calculate aspect ratio
-                            width_ratio = max_width / img.width
-                            height_ratio = max_height / img.height
-                            ratio = min(width_ratio, height_ratio, 1.0)  # Don't upscale
-                            
-                            new_width = int(img.width * ratio)
-                            new_height = int(img.height * ratio)
-                            
-                            # Resize using LANCZOS (highest quality)
-                            img_resized = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-                            
-                            # Save to temp file with HIGH quality
-                            temp_path = os.path.join(temp_dir, f"img_{row_idx}.jpg")
-                            img_resized.save(temp_path, 'JPEG', quality=95, optimize=True)
-                            temp_files.append(temp_path)
-                            
-                            # Add to Excel with original size (not scaled by Excel)
-                            xl_img = XLImage(temp_path)
-                            # Calculate Excel dimensions (1 unit ≈ 7 pixels)
-                            # This ensures the image displays at the correct size
-                            xl_img.width = new_width
-                            xl_img.height = new_height
-                            
-                            cell_ref = f'B{row_idx}'
-                            ws.add_image(xl_img, cell_ref)
-                            
-                            # Store row height - make it tall enough for the image
-                            image_rows[row_idx] = max(120, new_height // 7 + 10)
-                    else:
-                        ws.cell(row=row_idx, column=2, value="Image not found")
-                        ws.cell(row=row_idx, column=2).alignment = center_alignment
+                    # Resize to calculated dimensions
+                    img_resized = img.resize(
+                        (detail['width'], detail['height']), 
+                        Image.Resampling.LANCZOS
+                    )
+                    
+                    # Save to temp file with high quality
+                    temp_path = os.path.join(temp_dir, f"img_{row_idx}.jpg")
+                    img_resized.save(temp_path, 'JPEG', quality=95, optimize=True)
+                    temp_files.append(temp_path)
+                    
+                    # Add to Excel
+                    xl_img = XLImage(temp_path)
+                    # Set exact pixel dimensions in Excel
+                    xl_img.width = detail['width']
+                    xl_img.height = detail['height']
+                    
+                    cell_ref = f'B{row_idx}'
+                    ws.add_image(xl_img, cell_ref)
+                    
+                    # Set row height to match image + padding (pixels to points)
+                    # 1 point = 1.333 pixels (Excel uses points for row height)
+                    row_height = (detail['height'] + 10) / 1.333
+                    ws.row_dimensions[row_idx].height = row_height
+                    
                 except Exception as e:
                     print(f"Error adding image for lead {lead.get('id')}: {e}")
                     ws.cell(row=row_idx, column=2, value="Image Error")
                     ws.cell(row=row_idx, column=2).alignment = center_alignment
+                    ws.row_dimensions[row_idx].height = 20
             else:
                 ws.cell(row=row_idx, column=2, value="No Image")
                 ws.cell(row=row_idx, column=2).alignment = center_alignment
+                ws.row_dimensions[row_idx].height = 20
             
             # Other fields
             ws.cell(row=row_idx, column=3, value=lead.get('name'))
@@ -238,9 +289,21 @@ async def export_excel():
             ws.cell(row=row_idx, column=12, value=lead.get('message', ''))
             ws.cell(row=row_idx, column=12).alignment = wrap_alignment
         
-        # Apply row heights for rows with images
-        for row_idx, height in image_rows.items():
-            ws.row_dimensions[row_idx].height = height
+        # Auto-adjust other column widths
+        for col in [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
+            column_letter = get_column_letter(col)
+            max_length = 0
+            for row in range(2, len(leads) + 2):
+                cell_value = ws.cell(row=row, column=col).value
+                if cell_value:
+                    try:
+                        if len(str(cell_value)) > max_length:
+                            max_length = len(str(cell_value))
+                    except:
+                        pass
+            adjusted_width = min(max_length + 2, 50)
+            if adjusted_width > ws.column_dimensions[column_letter].width:
+                ws.column_dimensions[column_letter].width = adjusted_width
         
         # Save to memory
         output = io.BytesIO()
@@ -256,5 +319,5 @@ async def export_excel():
         )
     
     finally:
-        # Clean up temp directory and files
+        # Clean up temp files
         shutil.rmtree(temp_dir, ignore_errors=True)
